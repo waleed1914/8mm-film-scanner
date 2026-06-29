@@ -1,0 +1,23 @@
+"""Central UI palette.
+
+Change ACCENT to recolor the interactive parts of the whole application.
+"""
+
+ACCENT = "#19D3FF"
+ACCENT_HOVER = "#58E1FF"
+ACCENT_DARK = "#087C9C"
+
+APP_BG = "#07131F"
+SIDEBAR_BG = "#0A1B2B"
+TOPBAR_BG = "#0D2235"
+PANEL_BG = "#102A40"
+PANEL_ALT = "#0B2032"
+BUTTON_BG = "#173A54"
+BUTTON_HOVER = "#20506F"
+
+TEXT = "#F2FAFF"
+TEXT_MUTED = "#8BA9BC"
+SUCCESS = "#35D39A"
+WARNING = "#FFC857"
+DANGER = "#EF5B6B"
+
