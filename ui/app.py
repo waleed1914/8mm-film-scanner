@@ -16,7 +16,7 @@ import customtkinter as ctk
 
 from config import SCREEN_W, SCREEN_H
 from image_processor import ImageProcessor
-from camera_source import DummyCameraSource
+from camera_source import create_camera_source
 from app_settings import AppSettings
 from storage import (
     start_session,
@@ -57,7 +57,7 @@ class FilmDigitizerApp(ctk.CTk):
         # For 3.5 inch LCD fullscreen later:
         # self.attributes("-fullscreen", True)
 
-        self.camera = DummyCameraSource()
+        self.camera = create_camera_source(size=(4056, 3040))
         self.processor = ImageProcessor()
         self.settings = AppSettings.load()
         self.settings.load_processor_settings(self.processor)
@@ -71,6 +71,8 @@ class FilmDigitizerApp(ctk.CTk):
         self.capture_session = None
         self.last_auto_capture = 0
         self.encode_results = queue.Queue()
+        self.save_results = queue.Queue()
+        self.progress_updates = queue.Queue()
         self.running = True
         self.stream_after_id = None
         self.video_frame_queue = queue.Queue(maxsize=3)
@@ -85,6 +87,12 @@ class FilmDigitizerApp(ctk.CTk):
         self.preview_label = None
         self.info_label = None
         self.controls = None
+        self.busy_overlay = None
+        self.busy_title_label = None
+        self.busy_detail_label = None
+        self.busy_percent_label = None
+        self.busy_progress = None
+        self.busy_active = False
         self.icons = {
             name: make_icon(name)
             for name in (
@@ -107,6 +115,9 @@ class FilmDigitizerApp(ctk.CTk):
 
     def close_app(self):
         self.stop_video_playback()
+        if self.busy_active:
+            self.status_label.configure(text="PLEASE WAIT", text_color=WARNING)
+            return
         if self.capturing:
             self.stop_capturing()
             return
@@ -115,6 +126,10 @@ class FilmDigitizerApp(ctk.CTk):
             return
 
         self.running = False
+        try:
+            self.camera.close()
+        except Exception:
+            pass
         if self.stream_after_id is not None:
             try:
                 self.after_cancel(self.stream_after_id)
@@ -123,6 +138,9 @@ class FilmDigitizerApp(ctk.CTk):
         self.destroy()
 
     def navigation_allowed(self):
+        if self.busy_active:
+            self.status_label.configure(text="PLEASE WAIT", text_color=WARNING)
+            return False
         if self.video_current_path:
             self.status_label.configure(text="STOP VIDEO", text_color=WARNING)
             return False
@@ -207,6 +225,79 @@ class FilmDigitizerApp(ctk.CTk):
             corner_radius=0
         )
         self.content.pack(fill="both", expand=True, padx=(48, 0))
+        self.build_busy_overlay()
+
+    def build_busy_overlay(self):
+        self.busy_overlay = ctk.CTkFrame(
+            self.main,
+            width=SCREEN_W,
+            height=SCREEN_H,
+            fg_color=APP_BG,
+            corner_radius=0,
+        )
+
+        card = ctk.CTkFrame(
+            self.busy_overlay,
+            width=320,
+            height=150,
+            fg_color=PANEL_BG,
+            corner_radius=16,
+        )
+        card.place(relx=0.5, rely=0.5, anchor="center")
+
+        self.busy_title_label = ctk.CTkLabel(
+            card,
+            text="PLEASE WAIT",
+            font=("Arial", 18, "bold"),
+            text_color=TEXT,
+        )
+        self.busy_title_label.place(x=82, y=20)
+
+        self.busy_detail_label = ctk.CTkLabel(
+            card,
+            text="Saving your file...",
+            font=("Arial", 11),
+            text_color=TEXT_MUTED,
+        )
+        self.busy_detail_label.place(x=82, y=50)
+
+        self.busy_progress = ctk.CTkProgressBar(
+            card,
+            width=240,
+            height=16,
+            progress_color=ACCENT,
+            fg_color=PANEL_ALT,
+        )
+        self.busy_progress.place(x=40, y=88)
+        self.busy_progress.set(0)
+
+        self.busy_percent_label = ctk.CTkLabel(
+            card,
+            text="0%",
+            font=("Arial", 16, "bold"),
+            text_color=ACCENT,
+        )
+        self.busy_percent_label.place(x=138, y=113)
+
+    def show_busy_overlay(self, title, detail, percent=0):
+        self.busy_active = True
+        self.busy_title_label.configure(text=title)
+        self.busy_detail_label.configure(text=detail)
+        self.update_busy_progress(percent)
+        self.busy_overlay.place(x=0, y=0)
+        self.busy_overlay.lift()
+
+    def update_busy_progress(self, percent, detail=None):
+        percent = max(0, min(100, int(percent)))
+        if detail is not None:
+            self.busy_detail_label.configure(text=detail)
+        self.busy_progress.set(percent / 100)
+        self.busy_percent_label.configure(text=f"{percent}%")
+
+    def hide_busy_overlay(self):
+        self.busy_active = False
+        if self.busy_overlay is not None:
+            self.busy_overlay.place_forget()
 
     def clear_content(self):
         for widget in self.content.winfo_children():
@@ -1080,6 +1171,8 @@ class FilmDigitizerApp(ctk.CTk):
             return
 
         self.check_encode_result()
+        self.check_save_result()
+        self.check_progress_updates()
 
         if self.page == "player" and self.preview_label is not None:
             try:
@@ -1128,23 +1221,20 @@ class FilmDigitizerApp(ctk.CTk):
     # =====================================================
 
     def capture_once(self):
-        if self.encoding:
+        if self.encoding or self.busy_active:
             return
 
         frame = self.camera.get_frame()
         final_img = self.processor.make_final_image(frame)
-        path = save_single_frame(final_img, self.settings, prefix="frame")
-        print("Single frame saved:", path)
-
-        self.status_label.configure(text="SAVED", text_color=WARNING)
-
-        self.after(
-            800,
-            lambda: self.status_label.configure(text="STREAM", text_color=SUCCESS)
-        )
+        self.show_busy_overlay("SAVING FRAME", "Please wait...", 0)
+        threading.Thread(
+            target=self.save_single_frame_task,
+            args=(final_img,),
+            daemon=True,
+        ).start()
 
     def start_capturing(self):
-        if self.encoding:
+        if self.encoding or self.busy_active:
             return
 
         prefix = "recording" if self.settings.output_mode == "MP4" else "frames"
@@ -1163,7 +1253,7 @@ class FilmDigitizerApp(ctk.CTk):
         print("Session:", self.capture_session["name"])
 
     def stop_capturing(self):
-        if self.encoding:
+        if self.encoding or self.busy_active:
             return
 
         self.capturing = False
@@ -1179,6 +1269,7 @@ class FilmDigitizerApp(ctk.CTk):
             self.draw_capture_controls()
         elif self.settings.output_mode == "MP4":
             self.encoding = True
+            self.show_busy_overlay("CREATING VIDEO", "Encoding MP4...", 0)
             self.draw_capture_controls()
             threading.Thread(
                 target=self.encode_session,
@@ -1191,8 +1282,27 @@ class FilmDigitizerApp(ctk.CTk):
             self.draw_capture_controls()
 
     def encode_session(self, session, fps):
-        output_path = make_mp4_from_session(session, fps)
+        output_path = make_mp4_from_session(
+            session,
+            fps,
+            progress_callback=lambda percent: self.progress_updates.put(
+                ("video", percent, "Encoding MP4...")
+            ),
+        )
         self.encode_results.put(output_path)
+
+    def save_single_frame_task(self, final_img):
+        self.progress_updates.put(("frame", 10, "Preparing frame..."))
+        path = save_single_frame(
+            final_img,
+            self.settings,
+            prefix="frame",
+            progress_callback=lambda percent: self.progress_updates.put(
+                ("frame", percent, "Writing frame...")
+            ),
+        )
+        self.progress_updates.put(("frame", 100, "Frame saved"))
+        self.save_results.put(path)
 
     def check_encode_result(self):
         try:
@@ -1201,6 +1311,7 @@ class FilmDigitizerApp(ctk.CTk):
             return
 
         self.encoding = False
+        self.hide_busy_overlay()
         if output_path:
             self.status_label.configure(text="SAVED", text_color=SUCCESS)
         else:
@@ -1208,6 +1319,36 @@ class FilmDigitizerApp(ctk.CTk):
 
         if self.page == "capture":
             self.draw_capture_controls()
+
+    def check_save_result(self):
+        try:
+            path = self.save_results.get_nowait()
+        except queue.Empty:
+            return
+
+        self.hide_busy_overlay()
+        print("Single frame saved:", path)
+        self.status_label.configure(text="SAVED", text_color=WARNING)
+        self.after(
+            800,
+            lambda: self.status_label.configure(text="STREAM", text_color=SUCCESS)
+        )
+
+    def check_progress_updates(self):
+        latest = None
+        while True:
+            try:
+                latest = self.progress_updates.get_nowait()
+            except queue.Empty:
+                break
+
+        if latest is None or not self.busy_active:
+            return
+
+        job_type, percent, detail = latest
+        title = "CREATING VIDEO" if job_type == "video" else "SAVING FRAME"
+        self.busy_title_label.configure(text=title)
+        self.update_busy_progress(percent, detail)
 
     def fake_capture_loop(self):
         now = time.time()

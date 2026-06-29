@@ -200,12 +200,14 @@ def save_frame_to_session(img, session):
     return path
 
 
-def save_single_frame(img, settings, prefix="frame"):
+def save_single_frame(img, settings, prefix="frame", progress_callback=None):
     session = start_session(settings, prefix=prefix)
+    if progress_callback:
+        progress_callback(20)
     return save_frame_to_session(img, session)
 
 
-def make_mp4_from_session(session, fps):
+def make_mp4_from_session(session, fps, progress_callback=None):
     if session["frame_count"] <= 0:
         print("No frames captured. MP4 not created.")
         return None
@@ -223,6 +225,8 @@ def make_mp4_from_session(session, fps):
         "-y",
         "-framerate", str(fps),
         "-i", input_pattern,
+        "-progress", "pipe:1",
+        "-nostats",
         "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
         "-c:v", "libx264",
         "-preset", "slow",
@@ -235,14 +239,41 @@ def make_mp4_from_session(session, fps):
     print(" ".join(cmd))
 
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             cmd,
-            check=True,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
         )
+        duration_seconds = max(session["frame_count"] / max(fps, 1), 0.001)
+
+        if progress_callback:
+            progress_callback(0)
+
+        for line in process.stdout:
+            line = line.strip()
+            if not line or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key == "out_time_ms":
+                try:
+                    elapsed = int(value) / 1_000_000
+                    percent = min(99, max(0, int((elapsed / duration_seconds) * 100)))
+                    if progress_callback:
+                        progress_callback(percent)
+                except ValueError:
+                    pass
+
+        return_code = process.wait()
+        if return_code != 0:
+            raise subprocess.CalledProcessError(
+                return_code, cmd, output="", stderr=""
+            )
+
         print("MP4 saved:", output_path)
         cleanup_session_frames(session)
+        if progress_callback:
+            progress_callback(100)
         return output_path
     except subprocess.CalledProcessError as e:
         details = (e.stderr or e.stdout or str(e)).strip()
@@ -251,3 +282,9 @@ def make_mp4_from_session(session, fps):
     except OSError as e:
         print("MP4 creation failed:", e)
         return None
+    finally:
+        if "process" in locals() and process.stdout is not None:
+            try:
+                process.stdout.close()
+            except OSError:
+                pass
