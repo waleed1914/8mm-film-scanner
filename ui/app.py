@@ -101,6 +101,11 @@ class FilmDigitizerApp(ctk.CTk):
                 "edit", "reset", "film", "crop", "frame", "color", "delete"
             )
         }
+        self.brand_icons = {
+            "top": make_icon("logo", size=24),
+            "side": make_icon("logo", size=22),
+            "hero": make_icon("logo", size=58),
+        }
         self.dark_icons = {
             name: make_icon(name, color=APP_BG)
             for name in self.icons
@@ -110,7 +115,7 @@ class FilmDigitizerApp(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self.close_app)
 
         self.build_base()
-        self.show_home()
+        self.show_splash()
         self.update_stream()
 
     def close_app(self):
@@ -150,6 +155,68 @@ class FilmDigitizerApp(ctk.CTk):
         return True
 
     # =====================================================
+    # SPLASH SCREEN
+    # =====================================================
+
+    def show_splash(self):
+        self.page = "splash"
+        self.clear_content()
+        self.hide_standard_brand()
+        self.refresh_hardware_status()
+
+        self.mid_label.configure(text="START")
+        self.status_label.configure(text="BOOTING", text_color=WARNING)
+
+        splash = ctk.CTkFrame(
+            self.content,
+            width=432,
+            height=272,
+            fg_color=APP_BG,
+            corner_radius=0,
+        )
+        splash.place(x=0, y=0)
+
+        ctk.CTkLabel(
+            splash,
+            text="",
+            image=make_icon("logo", size=92),
+        ).place(x=170, y=38)
+
+        ctk.CTkLabel(
+            splash,
+            text="CARRERO-8",
+            width=432,
+            anchor="center",
+            font=("Arial", 34, "bold"),
+            text_color=TEXT,
+        ).place(x=0, y=138)
+
+        ctk.CTkLabel(
+            splash,
+            text="CINE FILM SCANNER",
+            width=432,
+            anchor="center",
+            font=("Arial", 14, "bold"),
+            text_color=TEXT_MUTED,
+        ).place(x=0, y=182)
+
+        ctk.CTkLabel(
+            splash,
+            text="Initializing camera and controls...",
+            width=432,
+            anchor="center",
+            font=("Arial", 11),
+            text_color=ACCENT,
+        ).place(x=0, y=226)
+
+        self.after(1500, self.finish_splash)
+
+    def finish_splash(self):
+        if self.page != "splash":
+            return
+        self.show_home()
+
+    # =====================================================
     # BASE UI
     # =====================================================
 
@@ -172,7 +239,7 @@ class FilmDigitizerApp(ctk.CTk):
         self.title_label = ctk.CTkLabel(
             self.top,
             text=" CARRERO-8",
-            image=self.icons["logo"],
+            image=self.brand_icons["top"],
             compound="left",
             font=("Arial", 12, "bold"),
             text_color=TEXT
@@ -195,15 +262,25 @@ class FilmDigitizerApp(ctk.CTk):
         )
         self.status_label.place(x=365, y=5)
 
+        self.camera_status_dot = ctk.CTkFrame(
+            self.top, width=10, height=10, fg_color=DANGER, corner_radius=5
+        )
+        self.camera_status_dot.place(x=334, y=9)
+
+        self.arduino_status_dot = ctk.CTkFrame(
+            self.top, width=10, height=10, fg_color=DANGER, corner_radius=5
+        )
+        self.arduino_status_dot.place(x=349, y=9)
+
         self.sidebar = ctk.CTkFrame(
             self.main, width=48, fg_color=SIDEBAR_BG, corner_radius=0
         )
         self.sidebar.place(x=0, y=0, relheight=1)
 
         self.side_logo = ctk.CTkLabel(
-            self.sidebar, text="", image=self.icons["logo"]
+            self.sidebar, text="", image=self.brand_icons["side"]
         )
-        self.side_logo.place(x=14, y=8)
+        self.side_logo.place(x=13, y=8)
 
         nav_items = (
             ("home", self.show_home, 60),
@@ -226,6 +303,22 @@ class FilmDigitizerApp(ctk.CTk):
         )
         self.content.pack(fill="both", expand=True, padx=(48, 0))
         self.build_busy_overlay()
+
+    def refresh_hardware_status(self):
+        self.camera_status_dot.configure(
+            fg_color=SUCCESS if self.camera_detected() else DANGER
+        )
+        self.arduino_status_dot.configure(
+            fg_color=SUCCESS if self.arduino_detected() else DANGER
+        )
+
+    def show_standard_brand(self):
+        self.title_label.place(x=8, y=3)
+        self.side_logo.place(x=13, y=8)
+
+    def hide_standard_brand(self):
+        self.title_label.place_forget()
+        self.side_logo.place_forget()
 
     def build_busy_overlay(self):
         self.busy_overlay = ctk.CTkFrame(
@@ -341,6 +434,50 @@ class FilmDigitizerApp(ctk.CTk):
         canvas.paste(fitted, (offset_x, offset_y))
         return canvas
 
+    def camera_detected(self):
+        return bool(getattr(self.camera, "is_real_camera", False))
+
+    def arduino_detected(self):
+        try:
+            from serial.tools import list_ports
+        except Exception:
+            return False
+
+        keywords = ("arduino", "usb serial", "ch340", "cp210", "ft232")
+        for port in list_ports.comports():
+            text = " ".join(
+                filter(None, [port.device, port.description, port.manufacturer])
+            ).lower()
+            if any(keyword in text for keyword in keywords):
+                return True
+        return False
+
+    def hardware_dot(self, parent, x, y, width, label, detected):
+        dot_color = SUCCESS if detected else DANGER
+        row = ctk.CTkFrame(
+            parent,
+            width=width,
+            height=22,
+            fg_color="transparent",
+            corner_radius=0,
+        )
+        row.place(x=x, y=y)
+        ctk.CTkFrame(
+            row,
+            width=12,
+            height=12,
+            fg_color=dot_color,
+            corner_radius=6,
+        ).place(x=0, y=5)
+        ctk.CTkLabel(
+            row,
+            text=label,
+            width=width - 18,
+            anchor="w",
+            font=("Arial", 10, "bold"),
+            text_color=TEXT_MUTED if detected else TEXT,
+        ).place(x=18, y=1)
+
     # =====================================================
     # HOME PAGE
     # =====================================================
@@ -350,18 +487,46 @@ class FilmDigitizerApp(ctk.CTk):
             return
         self.page = "home"
         self.clear_content()
+        self.refresh_hardware_status()
 
         self.mid_label.configure(text="HOME")
         self.status_label.configure(text="READY", text_color=SUCCESS)
+        self.show_standard_brand()
+
+        brand_row = ctk.CTkFrame(
+            self.content,
+            width=400,
+            height=62,
+            fg_color="transparent",
+            corner_radius=0,
+        )
+        brand_row.place(x=16, y=12)
+
+        ctk.CTkLabel(
+            brand_row,
+            text="",
+            image=self.brand_icons["hero"],
+        ).place(x=64, y=0)
 
         title = ctk.CTkLabel(
-            self.content,
+            brand_row,
             text="CARRERO-8",
-            width=400,
+            width=250,
+            anchor="center",
             font=("Arial", 28, "bold"),
             text_color=TEXT
         )
-        title.place(x=16, y=22)
+        title.place(x=118, y=6)
+
+        subtitle = ctk.CTkLabel(
+            brand_row,
+            text="CINE FILM SCANNER",
+            width=250,
+            anchor="center",
+            font=("Arial", 11, "bold"),
+            text_color=TEXT_MUTED,
+        )
+        subtitle.place(x=118, y=38)
 
         status_items = (
             ("FILM", self.settings.film_type),
@@ -373,7 +538,7 @@ class FilmDigitizerApp(ctk.CTk):
                 self.content, width=125, height=48,
                 fg_color=PANEL_BG, corner_radius=8
             )
-            card.place(x=18 + index * 135, y=67)
+            card.place(x=18 + index * 135, y=84)
             ctk.CTkLabel(
                 card, text=label, width=109, anchor="w",
                 font=("Arial", 9, "bold"), text_color=TEXT_MUTED
@@ -387,21 +552,21 @@ class FilmDigitizerApp(ctk.CTk):
             self.content,
             "Capture",
             self.show_capture,
-            18, 127, 125, 65, ACCENT, "camera"
+            18, 143, 125, 65, ACCENT, "camera"
         )
 
         self.btn(
             self.content,
             "Menu",
             self.show_menu,
-            153, 127, 125, 65, BUTTON_BG, "menu"
+            153, 143, 125, 65, BUTTON_BG, "menu"
         )
 
         self.btn(
             self.content,
             "Settings",
             self.show_settings,
-            288, 127, 125, 65, BUTTON_BG, "settings"
+            288, 143, 125, 65, BUTTON_BG, "settings"
         )
 
         note = ctk.CTkLabel(
@@ -410,7 +575,7 @@ class FilmDigitizerApp(ctk.CTk):
             font=("Arial", 11),
             text_color=WARNING
         )
-        note.place(x=62, y=226)
+        note.place(x=62, y=236)
 
     # =====================================================
     # CAPTURE PAGE
@@ -418,6 +583,8 @@ class FilmDigitizerApp(ctk.CTk):
 
     def show_capture(self):
         self.page = "capture"
+        self.show_standard_brand()
+        self.refresh_hardware_status()
         self.build_capture_page()
 
     def build_capture_page(self):
@@ -609,6 +776,8 @@ class FilmDigitizerApp(ctk.CTk):
             return
         self.page = "menu"
         self.clear_content()
+        self.show_standard_brand()
+        self.refresh_hardware_status()
 
         self.mid_label.configure(text="MENU")
         self.status_label.configure(text="READY", text_color=SUCCESS)
@@ -616,11 +785,11 @@ class FilmDigitizerApp(ctk.CTk):
         panel = ctk.CTkFrame(
             self.content,
             width=400,
-            height=236,
+            height=246,
             fg_color=PANEL_BG,
             corner_radius=14
         )
-        panel.place(x=16, y=10)
+        panel.place(x=16, y=8)
 
         self.btn(panel, "Recordings", self.show_recordings, 40, 20, 320, 38,
                  ACCENT, "film")
@@ -630,10 +799,10 @@ class FilmDigitizerApp(ctk.CTk):
                  BUTTON_BG, "rewind")
         self.btn(panel, "Fast Forward", self.motor_forward, 40, 164, 320, 38,
                  BUTTON_BG, "forward")
-        self.btn(panel, "Motor Stop", self.motor_stop, 40, 212, 320, 34,
+        self.btn(panel, "Motor Stop", self.motor_stop, 40, 206, 320, 36,
                  DANGER, "stop")
 
-        self.btn(self.content, "Back", self.show_home, 166, 252, 100, 28,
+        self.btn(self.content, "Back", self.show_home, 166, 258, 100, 26,
                  BUTTON_BG, "back")
 
     def show_recordings(self):
@@ -641,6 +810,8 @@ class FilmDigitizerApp(ctk.CTk):
             return
         self.page = "recordings"
         self.clear_content()
+        self.show_standard_brand()
+        self.refresh_hardware_status()
 
         self.mid_label.configure(text="RECORDINGS")
         self.status_label.configure(text="READY", text_color=SUCCESS)
@@ -697,6 +868,8 @@ class FilmDigitizerApp(ctk.CTk):
             return
         self.page = "frames"
         self.clear_content()
+        self.show_standard_brand()
+        self.refresh_hardware_status()
 
         self.mid_label.configure(text="FRAMES")
         self.status_label.configure(text="READY", text_color=SUCCESS)
@@ -806,6 +979,8 @@ class FilmDigitizerApp(ctk.CTk):
             return
         self.page = "settings"
         self.clear_content()
+        self.show_standard_brand()
+        self.refresh_hardware_status()
 
         self.mid_label.configure(text="SETTINGS")
         self.status_label.configure(text="READY", text_color=SUCCESS)
@@ -937,6 +1112,8 @@ class FilmDigitizerApp(ctk.CTk):
         self.video_current_path = path
         self.page = "player"
         self.clear_content()
+        self.show_standard_brand()
+        self.refresh_hardware_status()
 
         self.mid_label.configure(text="PLAYER")
         self.status_label.configure(text="PLAYING", text_color=WARNING)
@@ -963,16 +1140,24 @@ class FilmDigitizerApp(ctk.CTk):
         ctk.CTkLabel(
             panel,
             text=name[:34],
-            width=280,
+            width=300,
             anchor="w",
             font=("Arial", 10, "bold"),
             text_color=TEXT,
         ).place(x=10, y=10)
 
-        self.btn(panel, "Stop", self.stop_video_and_return, 10, 52, 90, 36, DANGER, "stop")
-        self.btn(panel, "Recordings", self.stop_video_and_show_recordings, 110, 52, 120, 36, BUTTON_BG, "film")
-        self.btn(panel, "Menu", self.stop_video_and_show_menu, 240, 52, 90, 36, BUTTON_BG, "menu")
-        self.btn(panel, "Home", self.stop_video_and_show_home, 340, 52, 86, 36, BUTTON_BG, "home")
+        self.btn(panel, "Stop", self.stop_video_and_return, 10, 52, 94, 36, DANGER, "stop")
+        self.btn(panel, "Recordings", self.stop_video_and_show_recordings, 112, 52, 100, 36, BUTTON_BG, "film")
+        self.btn(panel, "Menu", self.stop_video_and_show_menu, 220, 52, 94, 36, BUTTON_BG, "menu")
+        self.btn(panel, "Home", self.stop_video_and_show_home, 322, 52, 94, 36, BUTTON_BG, "home")
+
+        self.status_label.configure(text="LOADING", text_color=WARNING)
+        self.update_idletasks()
+        self.after(40, lambda p=path: self.start_video_playback(p))
+
+    def start_video_playback(self, path):
+        if self.page != "player" or self.video_current_path != path:
+            return
 
         self.video_stop_event.clear()
         self.video_thread = threading.Thread(
@@ -1105,6 +1290,8 @@ class FilmDigitizerApp(ctk.CTk):
         self.frame_session_index = 0
         self.page = "frame_viewer"
         self.clear_content()
+        self.show_standard_brand()
+        self.refresh_hardware_status()
 
         self.mid_label.configure(text="FRAMES")
         self.status_label.configure(text="VIEW", text_color=WARNING)

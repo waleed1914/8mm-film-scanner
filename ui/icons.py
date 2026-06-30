@@ -31,11 +31,26 @@ def make_icon(name, size=20, color=None):
                      fill=fill, width=max(1, int(width * scale)))
 
     if name == "logo":
-        # A compact film-reel "8" mark for CARRERO-8.
-        ellipse((5, 2, 19, 12), width=2.2)
-        ellipse((5, 12, 19, 22), width=2.2)
-        ellipse((10, 6, 14, 10), width=1.4)
-        ellipse((10, 14, 14, 18), width=1.4)
+        draw.rounded_rectangle(
+            (4 * scale, 4 * scale, 20 * scale, 20 * scale),
+            radius=int(5 * scale),
+            fill=color,
+        )
+        draw.rounded_rectangle(
+            (9 * scale, 7 * scale, 21 * scale, 17 * scale),
+            radius=int(3 * scale),
+            fill=(0, 0, 0, 0),
+        )
+        for y in (7, 10.5, 14, 17.5):
+            draw.rounded_rectangle(
+                (6 * scale, int(y * scale), 8 * scale, int((y + 1.6) * scale)),
+                radius=max(1, scale // 2),
+                fill=(255, 255, 255, 235),
+            )
+        draw.polygon(
+            (point(17, 9), point(21, 6), point(21, 18), point(17, 15)),
+            fill=(205, 210, 220, 255),
+        )
     elif name == "home":
         line(((3, 11), (12, 3), (21, 11)), width=2.1)
         line(((6, 10), (6, 21), (18, 21), (18, 10)))

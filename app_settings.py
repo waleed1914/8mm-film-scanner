@@ -23,8 +23,8 @@ class AppSettings:
         self.save()
 
     def cycle_fps(self):
-        fps_options = [10, 12, 15, 18, 20, 24, 30]
-        index = fps_options.index(self.video_fps) if self.video_fps in fps_options else 4
+        fps_options = [9, 10, 12, 15, 16, 18, 20, 24, 25, 30, 36, 48, 54]
+        index = fps_options.index(self.video_fps) if self.video_fps in fps_options else 6
         self.video_fps = fps_options[(index + 1) % len(fps_options)]
         self.save()
 

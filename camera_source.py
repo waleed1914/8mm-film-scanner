@@ -13,6 +13,8 @@ class DummyCameraSource:
             )
 
         self.image = Image.open(DUMMY_IMAGE).convert("RGB")
+        self.is_real_camera = False
+        self.camera_label = "DUMMY"
         print("Loaded dummy image:", DUMMY_IMAGE, self.image.size)
 
     def get_frame(self):
@@ -33,6 +35,8 @@ class Picamera2Source:
         )
         self.camera.configure(config)
         self.camera.start()
+        self.is_real_camera = True
+        self.camera_label = "CAMERA OK"
         print("Picamera2 started:", size)
 
     def get_frame(self):
